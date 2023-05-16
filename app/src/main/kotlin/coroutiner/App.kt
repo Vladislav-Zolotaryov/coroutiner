@@ -63,18 +63,18 @@ fun main() {
             println(result.joinToString(separator = ", ") { it.getLong("id").toString() })
         }
     }
-    
-    val configuration = PostgresqlConnectionConfiguration.builder()
-        .host("0.0.0.0")
-        .port(5432)
-        .database("app")
-        .username("myuser")
-        .password("mypass")
-        .build()
-    
-    val connectionFactory = PostgresqlConnectionFactory(configuration)
-    
+
     runBlocking {
+        val configuration = PostgresqlConnectionConfiguration.builder()
+            .host("0.0.0.0")
+            .port(5432)
+            .database("app")
+            .username("myuser")
+            .password("mypass")
+            .build()
+        
+        val connectionFactory = PostgresqlConnectionFactory(configuration)
+        
         val result = connectionFactory
             .create()
             .flatMapMany { connection ->

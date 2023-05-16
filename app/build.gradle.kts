@@ -61,13 +61,13 @@ application {
 }
 
 jmh {
-    warmup.set("1s")
-    warmupForks.set(0)
+    warmup.set("2s")
+    warmupForks.set(1)
     warmupIterations.set(1)
     warmupBatchSize.set(1)
     
-    timeOnIteration.set("1s")
-    fork.set(0)
-    iterations.set(1)
+    timeOnIteration.set("2s")
+    fork.set(1)
+    iterations.set(5)
     batchSize.set(1)
 }

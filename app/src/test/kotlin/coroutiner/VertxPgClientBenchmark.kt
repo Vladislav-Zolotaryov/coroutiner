@@ -1,7 +1,6 @@
 package coroutiner
 
-import coroutiner.setup.PostgreState
-import coroutiner.setup.asPgClient
+import coroutiner.setup.*
 import io.vertx.kotlin.coroutines.await
 import io.vertx.sqlclient.Row
 import io.vertx.sqlclient.Tuple
@@ -12,21 +11,23 @@ open class VertxPgClientBenchmark {
     
     @Benchmark
     @BenchmarkMode(Mode.Throughput)
-    fun singleRecordRetrieval(postgreState: PostgreState) {
-        val postgreSQLContainer = postgreState.postgreSQLContainer
+    fun singleRecordWhere(postgreState: PostgreState) {
         routine {
-            postgreSQLContainer.asPgClient().use { client ->
+            postgreState.pgClient.let { client ->
                 val query = client
                     .preparedQuery("${postgreState.baseQuery} WHERE u.id=$1")
                 
                 postgreState.singleQueryUserIds
                     .map { Tuple.of(it) }
-                    .forEach { tuple ->
+                    .flatMap { tuple ->
                         query.execute(tuple)
                             .await()
                             .map {
                                 it.fullUser()
                             }
+                    }
+                    .let {
+                        assert(it.size == postgreState.singleQueryUserIds.size)
                     }
             }
         }
@@ -34,26 +35,63 @@ open class VertxPgClientBenchmark {
     
     @Benchmark
     @BenchmarkMode(Mode.Throughput)
-    fun multiRecordRetrieval(postgreState: PostgreState) {
-        val postgreSQLContainer = postgreState.postgreSQLContainer
+    fun multiRecordWhere(postgreState: PostgreState) {
         routine {
-            postgreSQLContainer.asPgClient().use { client ->
+            postgreState.pgClient.let { client ->
                 val bindingString =
-                    (1..postgreState.singleQueryUserIds.size).map { "$$it" }.joinToString(separator = ", ")
+                    (1..postgreState.singleQueryUserIds.size).joinToString(separator = ", ") { "$$it" }
                 
-                val query = client
+                client
                     .preparedQuery("${postgreState.baseQuery} WHERE u.id IN ($bindingString)")
-                
-                query.execute(Tuple.tuple(postgreState.singleQueryUserIds))
+                    .execute(Tuple.tuple(postgreState.singleQueryUserIds))
                     .await()
                     .map {
                         it.fullUser()
+                    }
+                    .let {
+                        assert(it.size == postgreState.singleQueryUserIds.size)
                     }
             }
         }
     }
     
+    @Benchmark
+    @BenchmarkMode(Mode.Throughput)
+    fun largeQueryWithLimit(postgreState: PostgreState) {
+        routine {
+            postgreState.pgClient.let { client ->
+                client
+                    .query("${postgreState.baseQuery} LIMIT ${BenchmarkConfig.recordQueryLimit}")
+                    .execute()
+                    .await()
+                    .map {
+                        it.fullUser()
+                    }
+                    .let {
+                        assert(it.size == BenchmarkConfig.recordQueryLimit)
+                    }
+            }
+        }
+    }
     
+    @Benchmark
+    @BenchmarkMode(Mode.Throughput)
+    fun fullScan(postgreState: PostgreState) {
+        routine {
+            postgreState.pgClient.let { client ->
+                client
+                    .query(postgreState.baseQuery)
+                    .execute()
+                    .await()
+                    .map {
+                        it.fullUser()
+                    }
+                    .let {
+                        assert(it.size == BenchmarkConfig.userRecordCount)
+                    }
+            }
+        }
+    }
 }
 
 
@@ -62,27 +100,14 @@ fun main() {
     PostgreState()
         .open()
         .use { state ->
-            VertxPgClientBenchmark().singleRecordRetrieval(state)
-            VertxPgClientBenchmark().multiRecordRetrieval(state)
+            with(VertxPgClientBenchmark()) {
+                singleRecordWhere(state)
+                multiRecordWhere(state)
+                largeQueryWithLimit(state)
+                fullScan(state)
+            }
         }
 }
-
-data class UserFull(
-    val id: Long,
-    val name: String,
-    val groupId: Long,
-    val groupName: String,
-    val created: LocalDateTime,
-    val updated: LocalDateTime
-)
-
-data class UserRaw(val id: Long, val name: String, val groupId: Long)
-
-fun Row.rawUser() = UserRaw(
-    id = this.getLong("id"),
-    name = this.getString("name"),
-    groupId = this.getLong("group_id"),
-)
 
 fun Row.fullUser() = UserFull(
     id = this.getLong("user_id"),

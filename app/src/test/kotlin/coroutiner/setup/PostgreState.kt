@@ -1,12 +1,15 @@
 package coroutiner.setup
 
-import coroutiner.rawUser
 import coroutiner.setup.BenchmarkConfig.userRecordCount
-import coroutiner.use
+import io.r2dbc.pool.ConnectionPool
+import io.r2dbc.pool.ConnectionPoolConfiguration
+import io.r2dbc.postgresql.PostgresqlConnectionConfiguration
+import io.r2dbc.postgresql.PostgresqlConnectionFactory
 import io.vertx.kotlin.coroutines.await
 import io.vertx.pgclient.PgConnectOptions
 import io.vertx.pgclient.PgPool
 import io.vertx.sqlclient.PoolOptions
+import io.vertx.sqlclient.Row
 import io.vertx.sqlclient.SqlClient
 import io.vertx.sqlclient.Tuple
 import kotlinx.coroutines.runBlocking
@@ -23,21 +26,33 @@ class PostgreState : AutoCloseable {
     val postgreSQLContainer = PostgreSQLContainer("postgres:15-alpine")
     
     var singleQueryUserIds =
-        listOf(userRecordCount * 0.1, userRecordCount * 0.2, userRecordCount * 0.5, userRecordCount * 0.9).map { it.toInt() }
+        listOf(
+            userRecordCount * 0.1,
+            userRecordCount * 0.2,
+            userRecordCount * 0.5,
+            userRecordCount * 0.9
+        ).map { it.toInt() }
     
     val baseQuery =
         "SELECT u.id as user_id, u.name as user_name, g.id as group_id, g.name as group_name, u.created as user_created, u.updated as user_updated FROM users u JOIN groups g ON g.id = u.group_id"
+    
+    lateinit var pgClient: SqlClient
+    
+    lateinit var connectionPool: ConnectionPool
     
     @Setup
     fun setup() {
         postgreSQLContainer.start()
         
+        pgClient = postgreSQLContainer.asPgClient()
+        connectionPool = postgreSQLContainer.asR2dbcFactory()
+        
         runBlocking {
             postgreSQLContainer
-                .asPgClient()
-                .use { client ->
+            pgClient
+                .let { client ->
                     listOf(
-                    """
+                        """
                     CREATE TABLE IF NOT EXISTS groups (
                         id bigserial primary key,
                         name text not null,
@@ -46,7 +61,7 @@ class PostgreState : AutoCloseable {
                         UNIQUE (name)
                     )
                     """.trimIndent(),
-                    """
+                        """
                     CREATE TABLE IF NOT EXISTS users (
                         id bigserial primary key,
                         group_id bigint not null,
@@ -96,6 +111,8 @@ class PostgreState : AutoCloseable {
     
     @TearDown
     fun tearDown() {
+        pgClient.close()
+        connectionPool.close()
         postgreSQLContainer.stop()
     }
     
@@ -115,16 +132,39 @@ class PostgreState : AutoCloseable {
     }
 }
 
-fun PostgreSQLContainer<*>.asPgClient(): SqlClient {
+private fun PostgreSQLContainer<*>.asR2dbcFactory(): ConnectionPool {
+    val configuration = PostgresqlConnectionConfiguration.builder()
+        .host(host)
+        .port(firstMappedPort)
+        .database(databaseName)
+        .username(username)
+        .password(password)
+        .build()
+    
+    
+    val poolConfiguration = ConnectionPoolConfiguration.builder(PostgresqlConnectionFactory(configuration))
+        .maxSize(BenchmarkConfig.poolSize)
+        .build()
+    
+    return ConnectionPool(poolConfiguration)
+}
+
+private fun PostgreSQLContainer<*>.asPgClient(): SqlClient {
     val connectOptions = PgConnectOptions()
-        .setPort(this.firstMappedPort)
-        .setHost(this.host)
-        .setUser(this.username)
-        .setPassword(this.password)
-        .setDatabase(this.databaseName)
+        .setPort(firstMappedPort)
+        .setHost(host)
+        .setUser(username)
+        .setPassword(password)
+        .setDatabase(databaseName)
     
     return PgPool.client(
         connectOptions,
         PoolOptions().setMaxSize(BenchmarkConfig.poolSize)
     )
 }
+
+fun Row.rawUser() = UserRaw(
+    id = this.getLong("id"),
+    name = this.getString("name"),
+    groupId = this.getLong("group_id"),
+)
