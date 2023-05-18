@@ -1,7 +1,5 @@
 
 plugins {
-    id("me.champeau.jmh") version "0.7.1"
-    
     val kotlinPluginVersion = "1.8.21"
     id("org.jetbrains.kotlin.jvm") version kotlinPluginVersion
     id("org.jetbrains.kotlin.plugin.allopen") version kotlinPluginVersion
@@ -42,10 +40,6 @@ dependencies {
     
     implementation("org.slf4j:slf4j-simple:2.0.7")
     
-    val jmhVersion = "1.36"
-    testImplementation("org.openjdk.jmh:jmh-core:$jmhVersion")
-    testImplementation("org.openjdk.jmh:jmh-generator-annprocess:$jmhVersion")
-    
     val testContainersVersion = "1.18.1"
     testImplementation("org.testcontainers:testcontainers:$testContainersVersion")
     testImplementation("org.testcontainers:postgresql:$testContainersVersion")
@@ -58,18 +52,5 @@ java {
 }
 
 application {
-    // Define the main class for the application.
     mainClass.set("coroutiner.AppKt")
-}
-
-jmh {
-    warmup.set("2s")
-    warmupForks.set(1)
-    warmupIterations.set(1)
-    warmupBatchSize.set(1)
-    
-    timeOnIteration.set("2s")
-    fork.set(1)
-    iterations.set(1)
-    threads.set(50)
 }
