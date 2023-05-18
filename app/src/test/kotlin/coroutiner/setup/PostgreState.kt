@@ -1,10 +1,14 @@
 package coroutiner.setup
 
+import com.zaxxer.hikari.HikariConfig
+import com.zaxxer.hikari.pool.HikariPool
+import coroutiner.setup.BenchmarkConfig.poolSize
 import coroutiner.setup.BenchmarkConfig.userRecordCount
 import io.r2dbc.pool.ConnectionPool
 import io.r2dbc.pool.ConnectionPoolConfiguration
 import io.r2dbc.postgresql.PostgresqlConnectionConfiguration
 import io.r2dbc.postgresql.PostgresqlConnectionFactory
+import io.vertx.core.impl.cpu.CpuCoreSensor
 import io.vertx.kotlin.coroutines.await
 import io.vertx.pgclient.PgConnectOptions
 import io.vertx.pgclient.PgPool
@@ -12,10 +16,15 @@ import io.vertx.sqlclient.PoolOptions
 import io.vertx.sqlclient.Row
 import io.vertx.sqlclient.SqlClient
 import io.vertx.sqlclient.Tuple
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
 import org.openjdk.jmh.annotations.*
 import org.slf4j.LoggerFactory
 import org.testcontainers.containers.PostgreSQLContainer
+import kotlin.system.measureNanoTime
+import kotlin.time.Duration.Companion.nanoseconds
+import kotlin.time.Duration.Companion.seconds
 
 
 @State(Scope.Benchmark)
@@ -40,12 +49,22 @@ class PostgreState : AutoCloseable {
     
     lateinit var connectionPool: ConnectionPool
     
+    lateinit var hikariPool: HikariPool
+    
     @Setup
     fun setup() {
         postgreSQLContainer.start()
         
         pgClient = postgreSQLContainer.asPgClient()
         connectionPool = postgreSQLContainer.asR2dbcFactory()
+        
+        val hikariConfig = HikariConfig().apply {
+            maximumPoolSize = poolSize
+            jdbcUrl = "jdbc:postgresql://${postgreSQLContainer.host}:${postgreSQLContainer.firstMappedPort}/${postgreSQLContainer.databaseName}"
+            username = postgreSQLContainer.username
+            password = postgreSQLContainer.password
+        }
+        hikariPool = HikariPool(hikariConfig)
         
         runBlocking {
             postgreSQLContainer
@@ -84,18 +103,24 @@ class PostgreState : AutoCloseable {
                             .await()
                     }
                     
-                    (1..userRecordCount)
-                        .map {
-                            Tuple.of(
-                                names.random(),
-                                groupIdDistribution(it, userRecordCount, groups)
-                            )
-                        }
-                        .let { userTuples ->
-                            client.preparedQuery("INSERT INTO users (name, group_id) VALUES ($1, $2)")
-                                .executeBatch(userTuples)
-                                .await()
-                        }
+                    val createUserQuery = client.preparedQuery("INSERT INTO users (name, group_id) VALUES ($1, $2)")
+                    
+                    measureNanoTime {
+                        (1..userRecordCount)
+                            .map {
+                                Tuple.of(
+                                    names.random(),
+                                    groupIdDistribution(it, userRecordCount, groups)
+                                )
+                            }
+                            .map { userTuple ->
+                                async {
+                                    createUserQuery.execute(userTuple)
+                                }
+                            }.awaitAll()
+                    }.let {
+                        log.info("Creating users took ${it.nanoseconds}")
+                    }
                     
                     if (ExecutionConfig.printSetupDataSample) {
                         client
@@ -114,6 +139,7 @@ class PostgreState : AutoCloseable {
         pgClient.close()
         connectionPool.close()
         postgreSQLContainer.stop()
+        hikariPool.shutdown()
     }
     
     private fun groupIdDistribution(index: Int, total: Int, groups: List<String>): Int = when {
@@ -143,7 +169,7 @@ private fun PostgreSQLContainer<*>.asR2dbcFactory(): ConnectionPool {
     
     
     val poolConfiguration = ConnectionPoolConfiguration.builder(PostgresqlConnectionFactory(configuration))
-        .maxSize(BenchmarkConfig.poolSize)
+        .maxSize(poolSize)
         .build()
     
     return ConnectionPool(poolConfiguration)
@@ -159,7 +185,9 @@ private fun PostgreSQLContainer<*>.asPgClient(): SqlClient {
     
     return PgPool.client(
         connectOptions,
-        PoolOptions().setMaxSize(BenchmarkConfig.poolSize)
+        PoolOptions()
+            .setMaxSize(poolSize)
+            .setEventLoopSize(12)
     )
 }
 

@@ -32,6 +32,8 @@ dependencies {
     implementation("org.postgresql:r2dbc-postgresql:1.0.1.RELEASE")
     implementation("io.r2dbc:r2dbc-pool:1.0.0.RELEASE")
     
+    // JDBC
+    implementation("com.zaxxer:HikariCP:5.0.1")
     implementation("org.postgresql:postgresql:42.6.0")
     
     val scramVersion = "2.1"
@@ -68,6 +70,6 @@ jmh {
     
     timeOnIteration.set("2s")
     fork.set(1)
-    iterations.set(5)
-    batchSize.set(1)
+    iterations.set(1)
+    threads.set(50)
 }

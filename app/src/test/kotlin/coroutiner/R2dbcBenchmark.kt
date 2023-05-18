@@ -4,20 +4,20 @@ import coroutiner.setup.*
 import io.r2dbc.spi.Connection
 import io.r2dbc.spi.Row
 import kotlinx.coroutines.reactive.awaitSingle
-import org.openjdk.jmh.annotations.Benchmark
-import org.openjdk.jmh.annotations.BenchmarkMode
-import org.openjdk.jmh.annotations.Mode
+import kotlinx.coroutines.runBlocking
+import org.openjdk.jmh.annotations.*
 import org.reactivestreams.Publisher
 import reactor.core.publisher.Flux
 import reactor.core.publisher.Mono
 import java.time.LocalDateTime
+import kotlin.system.measureNanoTime
+import kotlin.time.Duration.Companion.nanoseconds
 
 open class R2dbcBenchmark {
     
     @Benchmark
-    @BenchmarkMode(Mode.Throughput)
-    fun singleRecordWhere(postgreState: PostgreState) {
-        routine {
+    @BenchmarkMode(Mode.AverageTime)
+    suspend fun singleRecordWhere(postgreState: PostgreState) {
             Mono.usingWhen(
                 postgreState.connectionPool.create(),
                 { connection ->
@@ -36,13 +36,12 @@ open class R2dbcBenchmark {
                 Connection::close,
             ).awaitSingle()
                 .let {
-                    assert(it.size == postgreState.singleQueryUserIds.size)
+                    require(it.size == postgreState.singleQueryUserIds.size)
                 }
-        }
     }
     
     @Benchmark
-    @BenchmarkMode(Mode.Throughput)
+    @BenchmarkMode(Mode.AverageTime)
     fun multiRecordWhere(postgreState: PostgreState) {
         routine {
             Mono.usingWhen(
@@ -69,13 +68,13 @@ open class R2dbcBenchmark {
                 Connection::close,
             ).awaitSingle()
                 .let {
-                    assert(it.size == postgreState.singleQueryUserIds.size)
+                    require(it.size == postgreState.singleQueryUserIds.size)
                 }
         }
     }
     
     @Benchmark
-    @BenchmarkMode(Mode.Throughput)
+    @BenchmarkMode(Mode.AverageTime)
     fun largeQueryWithLimit(postgreState: PostgreState) {
         routine {
             Mono.usingWhen(
@@ -95,13 +94,13 @@ open class R2dbcBenchmark {
             )
                 .awaitSingle()
                 .let {
-                    assert(it.size == BenchmarkConfig.recordQueryLimit)
+                    require(it.size == BenchmarkConfig.recordQueryLimit)
                 }
         }
     }
     
     @Benchmark
-    @BenchmarkMode(Mode.Throughput)
+    @BenchmarkMode(Mode.AverageTime)
     fun fullScan(postgreState: PostgreState) {
         routine {
             Mono.usingWhen(
@@ -120,7 +119,7 @@ open class R2dbcBenchmark {
             )
                 .awaitSingle()
                 .let {
-                    assert(it.size == BenchmarkConfig.userRecordCount)
+                    require(it.size == BenchmarkConfig.userRecordCount)
                 }
         }
     }
@@ -128,15 +127,32 @@ open class R2dbcBenchmark {
 
 
 // Dev Runner
-fun main() {
+fun r2dbcRun() {
     PostgreState()
         .open()
         .use { state ->
             with(R2dbcBenchmark()) {
-                repeat(30) { singleRecordWhere(state) }
-                multiRecordWhere(state)
-                largeQueryWithLimit(state)
-                fullScan(state)
+                runBlocking {
+                    singleRecordWhere(state)
+                    measureNanoTime {
+                        singleRecordWhere(state)
+                    }.let { println("R2DBC singleRecordWhere took ${it.nanoseconds / 5} per operation") }
+                    
+                    multiRecordWhere(state)
+                    measureNanoTime {
+                        multiRecordWhere(state)
+                    }.let { println("R2DBC multiRecordWhere took ${it.nanoseconds / 5} per operation") }
+                    
+                    largeQueryWithLimit(state)
+                    measureNanoTime {
+                        largeQueryWithLimit(state)
+                    }.let { println("R2DBC largeQueryWithLimit took ${it.nanoseconds / 5} per operation") }
+                    
+                    fullScan(state)
+                    measureNanoTime {
+                        fullScan(state)
+                    }.let { println("R2DBC fullScan took ${it.nanoseconds / 5} per operation") }
+                }
             }
         }
 }

@@ -4,37 +4,40 @@ import coroutiner.setup.*
 import io.vertx.kotlin.coroutines.await
 import io.vertx.sqlclient.Row
 import io.vertx.sqlclient.Tuple
+import kotlinx.coroutines.runBlocking
 import org.openjdk.jmh.annotations.*
 import java.time.LocalDateTime
+import kotlin.system.measureNanoTime
+import kotlin.time.Duration.Companion.nanoseconds
 
 open class VertxPgClientBenchmark {
     
     @Benchmark
-    @BenchmarkMode(Mode.Throughput)
-    fun singleRecordWhere(postgreState: PostgreState) {
-        routine {
-            postgreState.pgClient.let { client ->
-                val query = client
-                    .preparedQuery("${postgreState.baseQuery} WHERE u.id=$1")
-                
-                postgreState.singleQueryUserIds
-                    .map { Tuple.of(it) }
-                    .flatMap { tuple ->
-                        query.execute(tuple)
-                            .await()
-                            .map {
-                                it.fullUser()
+    @BenchmarkMode(Mode.AverageTime)
+    suspend fun singleRecordWhere(postgreState: PostgreState) {
+        postgreState.pgClient.let { client ->
+            val query = client
+                .preparedQuery("${postgreState.baseQuery} WHERE u.id=$1")
+            
+            postgreState.singleQueryUserIds
+                .map { Tuple.of(it) }
+                .flatMap { tuple ->
+                    query.execute(tuple)
+                        .map {
+                            it.map { row ->
+                                row.fullUser()
                             }
-                    }
-                    .let {
-                        assert(it.size == postgreState.singleQueryUserIds.size)
-                    }
-            }
+                        }
+                        .await()
+                }
+                .let {
+                    require(it.size == postgreState.singleQueryUserIds.size)
+                }
         }
     }
     
     @Benchmark
-    @BenchmarkMode(Mode.Throughput)
+    @BenchmarkMode(Mode.AverageTime)
     fun multiRecordWhere(postgreState: PostgreState) {
         routine {
             postgreState.pgClient.let { client ->
@@ -44,50 +47,56 @@ open class VertxPgClientBenchmark {
                 client
                     .preparedQuery("${postgreState.baseQuery} WHERE u.id IN ($bindingString)")
                     .execute(Tuple.tuple(postgreState.singleQueryUserIds))
-                    .await()
                     .map {
-                        it.fullUser()
+                        it.map { row ->
+                            row.fullUser()
+                        }
                     }
+                    .await()
                     .let {
-                        assert(it.size == postgreState.singleQueryUserIds.size)
+                        require(it.size == postgreState.singleQueryUserIds.size)
                     }
             }
         }
     }
     
     @Benchmark
-    @BenchmarkMode(Mode.Throughput)
+    @BenchmarkMode(Mode.AverageTime)
     fun largeQueryWithLimit(postgreState: PostgreState) {
         routine {
             postgreState.pgClient.let { client ->
                 client
                     .query("${postgreState.baseQuery} LIMIT ${BenchmarkConfig.recordQueryLimit}")
                     .execute()
-                    .await()
                     .map {
-                        it.fullUser()
+                        it.map { row ->
+                            row.fullUser()
+                        }
                     }
+                    .await()
                     .let {
-                        assert(it.size == BenchmarkConfig.recordQueryLimit)
+                        require(it.size == BenchmarkConfig.recordQueryLimit)
                     }
             }
         }
     }
     
     @Benchmark
-    @BenchmarkMode(Mode.Throughput)
+    @BenchmarkMode(Mode.AverageTime)
     fun fullScan(postgreState: PostgreState) {
         routine {
             postgreState.pgClient.let { client ->
                 client
                     .query(postgreState.baseQuery)
                     .execute()
-                    .await()
                     .map {
-                        it.fullUser()
+                        it.map { row ->
+                            row.fullUser()
+                        }
                     }
+                    .await()
                     .let {
-                        assert(it.size == BenchmarkConfig.userRecordCount)
+                        require(it.size == BenchmarkConfig.userRecordCount)
                     }
             }
         }
@@ -96,15 +105,32 @@ open class VertxPgClientBenchmark {
 
 
 // Dev Runner
-fun main() {
+fun vertxRun() {
     PostgreState()
         .open()
         .use { state ->
-            with(VertxPgClientBenchmark()) {
-                singleRecordWhere(state)
-                multiRecordWhere(state)
-                largeQueryWithLimit(state)
-                fullScan(state)
+            runBlocking {
+                with(VertxPgClientBenchmark()) {
+                    singleRecordWhere(state)
+                    measureNanoTime {
+                        singleRecordWhere(state)
+                    }.let { println("Vertx singleRecordWhere took ${it.nanoseconds / 5} per operation") }
+                    
+                    multiRecordWhere(state)
+                    measureNanoTime {
+                        multiRecordWhere(state)
+                    }.let { println("Vertx multiRecordWhere took ${it.nanoseconds / 5} per operation") }
+                    
+                    largeQueryWithLimit(state)
+                    measureNanoTime {
+                        largeQueryWithLimit(state)
+                    }.let { println("Vertx largeQueryWithLimit took ${it.nanoseconds / 5} per operation") }
+                    
+                    fullScan(state)
+                    measureNanoTime {
+                        fullScan(state)
+                    }.let { println("Vertx fullScan took ${it.nanoseconds / 5} per operation") }
+                }
             }
         }
 }
