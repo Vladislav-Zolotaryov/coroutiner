@@ -16,7 +16,7 @@ class R2dbcState(postgresContainerState: PostgresContainerState) : AutoCloseable
     
     fun <T> connection(block: (Connection) -> Mono<T>): Mono<T> {
         return Mono.usingWhen(
-            r2dbcPool.create(),
+            Mono.from(r2dbcPool.create()),
             { r2dbcConn -> block.invoke(r2dbcConn) },
             Connection::close,
         )

@@ -100,6 +100,7 @@ private fun PostgreSQLContainer<*>.asVertxPgClient(): SqlClient {
             .setUser(username)
             .setPassword(password)
             .setDatabase(databaseName)
+            .setCachePreparedStatements(true)
     
     return PgPool.client(
         connectOptions,
