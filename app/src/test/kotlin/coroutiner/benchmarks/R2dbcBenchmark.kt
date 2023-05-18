@@ -65,19 +65,6 @@ open class R2dbcBenchmark {
                 }.collectList()
         }
     }
-    
-    fun fullScan(r2dbcState: R2dbcState): Mono<List<UserFull>> {
-        return r2dbcState.connection { connection ->
-            connection.createStatement(BenchmarkQueries.baseQuery)
-                .execute()
-                .toFlux()
-                .flatMap { result ->
-                    result.map { row, _ ->
-                        row.fullUser()
-                    }
-                }.collectList()
-        }
-    }
 }
 
 fun Row.fullUser() = UserFull(

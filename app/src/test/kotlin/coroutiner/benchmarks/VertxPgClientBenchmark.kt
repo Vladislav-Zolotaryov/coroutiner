@@ -52,19 +52,6 @@ open class VertxPgClientBenchmark {
                 }
         }
     }
-    
-    fun fullScan(vertxPgState: VertxPgState): Future<List<UserFull>> {
-        return vertxPgState.connection { client ->
-            client
-                .query(BenchmarkQueries.baseQuery)
-                .execute()
-                .map {
-                    it.map { row ->
-                        row.fullUser()
-                    }
-                }
-        }
-    }
 }
 
 fun Row.fullUser() = UserFull(

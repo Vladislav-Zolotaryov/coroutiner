@@ -65,23 +65,6 @@ open class JdbcBenchmark {
         
         return result
     }
-    
-    fun fullScan(jdbcState: JdbcState): List<UserFull> {
-        val result = mutableListOf<UserFull>()
-        
-        jdbcState.connection { cn ->
-            cn.createStatement().use { st ->
-                st.executeQuery(BenchmarkQueries.baseQuery).use { rs ->
-                    while (rs.next()) {
-                        result.add(rs.fullUser())
-                    }
-                }
-            }
-        }
-        
-        return result
-    }
-    
 }
 
 fun ResultSet.fullUser() = UserFull(
